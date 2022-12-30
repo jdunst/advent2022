@@ -114,38 +114,114 @@ func noValidMoves(current valve, valves map[string]*valve, opened []*valve, time
 	return true
 }
 
-func calcScore(current valve, valves map[string]*valve, time int, released int, opened []*valve, best int, duration int) int {
+func availablePumps(valves map[string]*valve, opened []*valve) []*valve {
+	var available []*valve
+	for _, v := range valves {
+		open := false
+		for _, o := range opened {
+			if v == o {
+				open = true
+			}
+		}
+		if !open && v.name != "AA" {
+			available = append(available, v)
+		}
+	}
+	return available
+}
+
+func calcScore(current [2]*valve, valves map[string]*valve, times [2]int, released [2]int, masterOpened []*valve, opens [2][]*valve, flows [2]int, best int, duration int, moves []string) int {
 	// check every open valve to calculate current flow
-	currentFlow := 0
-	for _, v := range opened {
-		currentFlow += v.flow
-	}
-
-	// open new valve if needed, add to opened
-	// add to time, add to flow since it takes one minute to open
-	if !checkOpened(current, opened) && current.flow != 0 {
-		time += 1
-		released += currentFlow
-		opened = append(opened, &current)
-		currentFlow += current.flow
-
-	}
-
-	if (checkAllOpened(valves, opened) && time < duration) || noValidMoves(current, valves, opened, time, duration) {
-		// base case. ends recursion if there are no valid moves or all valves are opened
-		// if time is > 30 then we add 0 * currentFlow, filtering out invalid scenarios
-		released += (currentFlow * (duration - time))
-		if released > best {
-			best = released
+	flows[0], flows[1] = 0, 0
+	for index := range flows {
+		for _, openedValve := range opens[index] {
+			flows[index] += openedValve.flow
 		}
 
-	} else if time < duration {
-		// try possible moves while time is available
-		for _, v := range valves {
-			// if it's not the current valve, it's not our start (AA), and it's not opened, explore a path to it
-			if v != &current && !checkOpened(*v, opened) && v.name != "AA" {
-				distance := current.paths[v.name].length
-				best = calcScore(*v, valves, (time + distance), released+(currentFlow*(distance)), opened, best, duration)
+	}
+	// fmt.Println(flows[0], flows[1])
+	// open new valve if needed, add to opened
+	// add to time, add to flow since it takes one minute to open
+	for index := range current {
+		if !checkOpened(*current[index], masterOpened) && current[index].flow != 0 {
+			times[index] += 1
+			released[index] += flows[index]
+			masterOpened = append(masterOpened, current[index])
+			opens[index] = append(opens[index], current[index])
+			flows[index] += current[index].flow
+		}
+	}
+
+	if len(valves) == len(masterOpened)+1 || (noValidMoves(*current[0], valves, masterOpened, times[0], duration) && noValidMoves(*current[1], valves, masterOpened, times[1], duration)) {
+		if times[0] <= duration && times[1] <= duration {
+			for i := 0; i < 2; i++ {
+				released[i] += (flows[i] * (duration - times[i]))
+			}
+			totalReleased := (released[0] + released[1])
+			if totalReleased > best {
+				best = totalReleased
+				fmt.Printf("total released: %v, with times %v and %v\n", totalReleased, times[0], times[1])
+			}
+		}
+
+		// base case. ends recursion if there are no valid moves or all valves are opened
+		// if time is > 30 then we add 0 * currentFlow, filtering out invalid scenarios
+
+	} else if times[0] < duration && times[1] < duration {
+		previousV := current[0]
+		previousX := current[1]
+		available := availablePumps(valves, masterOpened)
+
+		// if there's two available and they both have valid moves
+		if len(available) >= 2 && (!noValidMoves(*current[0], valves, masterOpened, times[0], duration) && !noValidMoves(*current[1], valves, masterOpened, times[1], duration)) {
+			for _, v := range available {
+
+				vdistance := current[0].paths[v.name].length
+				times[0] += vdistance
+				released[0] += (flows[0] * vdistance)
+				current[0] = v
+				for _, x := range available {
+					if v != x {
+						xdistance := current[1].paths[x.name].length
+						times[1] += xdistance
+						released[1] += (flows[1] * xdistance)
+						current[1] = x
+						best = calcScore(current, valves, times, released, masterOpened, opens, flows, best, duration, moves)
+						times[1] -= xdistance
+						released[1] -= (flows[1] * xdistance)
+						current[1] = previousX
+					}
+				}
+				times[0] -= vdistance
+				released[0] -= (flows[0] * vdistance)
+				current[0] = previousV
+			}
+			// if just the first runner has valid moves
+		} else if !noValidMoves(*current[0], valves, masterOpened, times[0], duration) && noValidMoves(*current[1], valves, masterOpened, times[1], duration) {
+			for _, v := range available {
+				if v != current[0] {
+					vdistance := current[0].paths[v.name].length
+					times[0] += vdistance
+					released[0] += (flows[0] * vdistance)
+					current[0] = v
+					best = calcScore(current, valves, times, released, masterOpened, opens, flows, best, duration, moves)
+					times[0] -= vdistance
+					released[0] -= (flows[0] * vdistance)
+					current[0] = previousV
+				}
+
+			}
+			// if just the second unner has valid moves
+		} else if noValidMoves(*current[0], valves, masterOpened, times[0], duration) && !noValidMoves(*current[1], valves, masterOpened, times[1], duration) {
+			for _, v := range available {
+				vdistance := current[1].paths[v.name].length
+				times[1] += vdistance
+				released[1] += (flows[1] * vdistance)
+				current[1] = v
+				best = calcScore(current, valves, times, released, masterOpened, opens, flows, best, duration, moves)
+				times[1] -= vdistance
+				released[1] -= (flows[1] * vdistance)
+				current[1] = previousX
 			}
 		}
 	}
@@ -155,8 +231,8 @@ func calcScore(current valve, valves map[string]*valve, time int, released int, 
 
 func main() {
 	start := time.Now()
-	// input := ReadFile("config/test_input.txt")
 	input := ReadFile("config/real_input.txt")
+	// input := ReadFile("config/test_input.txt")
 
 	// map of all valves
 	allValves := make(map[string]*valve)
@@ -178,8 +254,15 @@ func main() {
 		}
 
 	}
-	var opened []*valve
-	best := calcScore(*flowValves["AA"], flowValves, 0, 0, opened, 0, 30)
+	var allOpened []*valve
+	current := [2]*valve{flowValves["AA"], flowValves["AA"]}
+	opens := [2][]*valve{}
+	times := [2]int{0, 0}
+	flows := [2]int{0, 0}
+	released := [2]int{0, 0}
+	var moves []string
+	best := calcScore(current, flowValves, times, released, allOpened, opens, flows, 0, 26, moves)
 	fmt.Println(best)
 	fmt.Println(time.Since(start))
+	// 2392 too low
 }
